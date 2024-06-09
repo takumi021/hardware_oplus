@@ -18,16 +18,14 @@
 
 #include <android-base/file.h>
 #include <android-base/strings.h>
+#include <android/binder_manager.h>
+#include <android-base/logging.h>
 
 #include <TouchscreenGestureConfig.h>
 
-using ::android::base::ReadFileToString;
 using ::android::base::Trim;
-using ::android::base::WriteStringToFile;
 
 namespace {
-
-constexpr const char* kGestureEnableIndepPath = "/proc/touchpanel/double_tap_enable_indep";
 
 }  // anonymous namespace
 
@@ -52,20 +50,32 @@ Return<void> TouchscreenGesture::getSupportedGestures(getSupportedGestures_cb re
 }
 
 Return<bool> TouchscreenGesture::setGestureEnabled(const Gesture& gesture, bool enabled) {
-    std::string tmp;
+    std::string tmp = "OPTG";
     int contents = 0;
+    int result;
 
-    if (ReadFileToString(kGestureEnableIndepPath, &tmp)) {
-        contents = std::stoi(Trim(tmp), nullptr, 16);
-    }
+    // Connect to IOplusTouch
+    const std::string instance = std::string() + IOplusTouch::descriptor + "/default";
+    mTouchService = IOplusTouch::fromBinder(
+    ndk::SpAIBinder(AServiceManager_waitForService(instance.c_str())));
 
+    // Read current value
+    mTouchService->touchReadNodeFile(0, 21, &tmp);
+    contents = std::stoi(tmp, nullptr, 16);
+
+    // Manipulate value
     if (enabled) {
         contents |= (1 << (gesture.keycode - kGestureStartKey));
     } else {
         contents &= ~(1 << (gesture.keycode - kGestureStartKey));
     }
 
-    return WriteStringToFile(std::to_string(contents), kGestureEnableIndepPath, true);
+    // Always keep gestures enabled
+    mTouchService->touchWriteNodeFile(0, 1, "1", &result);
+    // Set gesture type
+    mTouchService->touchWriteNodeFile(0, 21, std::to_string(contents), &result);
+
+    return true;
 }
 
 }  // namespace implementation
